@@ -42,7 +42,7 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
     p2p.onConnection((peerId) => {
       setConnectedPeer(peerId);
       toast.success('Устройство подключено!', {
-        description: `ID: ${peerId.substring(0, 8)}...`,
+        description: `ID: ${peerId}`,
       });
     });
 

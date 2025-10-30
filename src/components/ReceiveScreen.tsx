@@ -40,7 +40,7 @@ export default function ReceiveScreen({ onFileReceived }: ReceiveScreenProps) {
     p2p.onConnection((peerId) => {
       setConnectedPeer(peerId);
       toast.success('Устройство подключилось!', {
-        description: `ID: ${peerId.substring(0, 8)}...`,
+        description: `ID: ${peerId}`,
       });
     });
 
