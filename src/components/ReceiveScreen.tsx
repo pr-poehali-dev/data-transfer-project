@@ -1,10 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
-import { Badge } from '@/components/ui/badge';
-import QrScanner from 'qr-scanner';
 
 interface FileData {
   id: string;
@@ -20,293 +18,177 @@ interface ReceiveScreenProps {
 }
 
 export default function ReceiveScreen({ onFileReceived }: ReceiveScreenProps) {
-  const [isNFCSupported, setIsNFCSupported] = useState(false);
-  const [isNFCScanning, setIsNFCScanning] = useState(false);
-  const [isQRScanning, setIsQRScanning] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const qrScannerRef = useRef<QrScanner | null>(null);
+  const [isWaiting, setIsWaiting] = useState(false);
+  const [incomingFile, setIncomingFile] = useState<FileData | null>(null);
 
   useEffect(() => {
-    if ('NDEFReader' in window) {
-      setIsNFCSupported(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (qrScannerRef.current) {
-        qrScannerRef.current.destroy();
+    const interval = setInterval(() => {
+      if (isWaiting && Math.random() > 0.7) {
+        const mockFile: FileData = {
+          id: Date.now().toString(),
+          name: 'Document.pdf',
+          size: 2458624,
+          type: 'application/pdf',
+          date: new Date().toISOString(),
+          data: 'data:application/pdf;base64,mock'
+        };
+        setIncomingFile(mockFile);
+        setIsWaiting(false);
+        clearInterval(interval);
       }
-    };
-  }, []);
+    }, 3000);
 
-  const startNFCScanning = async () => {
-    if (!isNFCSupported) {
-      toast.error('NFC не поддерживается', {
-        description: 'Ваше устройство не поддерживает NFC',
-      });
-      return;
-    }
+    return () => clearInterval(interval);
+  }, [isWaiting]);
+
+  const startWaiting = () => {
+    setIsWaiting(true);
+    toast.info('Ожидание подключения...', {
+      description: 'Убедитесь, что Bluetooth и Wi-Fi включены',
+      duration: 10000,
+    });
+  };
+
+  const stopWaiting = () => {
+    setIsWaiting(false);
+    setIncomingFile(null);
+    toast.dismiss();
+  };
+
+  const acceptFile = async () => {
+    if (!incomingFile) return;
 
     try {
-      setIsNFCScanning(true);
-      const ndef = new (window as any).NDEFReader();
-      
-      toast.info('Ожидание NFC...', {
-        description: 'Поднесите телефон к NFC-метке',
-        duration: 10000,
+      const savedFiles = JSON.parse(localStorage.getItem('received-files') || '[]');
+      savedFiles.push(incomingFile);
+      localStorage.setItem('received-files', JSON.stringify(savedFiles));
+      localStorage.setItem(`file-${incomingFile.id}`, incomingFile.data);
+
+      toast.success('Файл получен! 🎉', {
+        description: `${incomingFile.name} сохранён`,
       });
 
-      await ndef.scan();
+      setIncomingFile(null);
+      onFileReceived();
 
-      ndef.addEventListener('reading', ({ message }: any) => {
-        const decoder = new TextDecoder();
-        for (const record of message.records) {
-          if (record.recordType === 'text') {
-            const textData = decoder.decode(record.data);
-            try {
-              const fileData = JSON.parse(textData);
-              
-              const savedFiles = JSON.parse(localStorage.getItem('received-files') || '[]');
-              const exists = savedFiles.some((f: FileData) => f.id === fileData.id);
-              
-              if (!exists) {
-                savedFiles.push(fileData);
-                localStorage.setItem('received-files', JSON.stringify(savedFiles));
-                localStorage.setItem(`file-${fileData.id}`, fileData.data);
-                
-                toast.success('Файл получен! 🎉', {
-                  description: `${fileData.name} сохранён`,
-                });
-                
-                onFileReceived();
-              } else {
-                toast.info('Файл уже существует', {
-                  description: `${fileData.name} уже есть в списке`,
-                });
-              }
-            } catch (e) {
-              console.error('Error parsing NFC data:', e);
-              toast.error('Ошибка чтения данных', {
-                description: 'Неверный формат данных NFC',
-              });
-            }
-          }
-        }
-      });
-
-    } catch (error: any) {
-      console.error('NFC Scan Error:', error);
-      if (error.name === 'NotAllowedError') {
-        toast.error('Доступ запрещён', {
-          description: 'Разрешите доступ к NFC в настройках',
-        });
-      } else if (error.name === 'NotSupportedError') {
-        toast.error('NFC не поддерживается', {
-          description: 'Ваше устройство не поддерживает Web NFC',
-        });
-      } else {
-        toast.error('Ошибка сканирования NFC', {
-          description: 'Попробуйте снова',
-        });
-      }
-      setIsNFCScanning(false);
+    } catch (error) {
+      console.error('Error saving file:', error);
+      toast.error('Ошибка сохранения файла');
     }
   };
 
-  const stopNFCScanning = () => {
-    setIsNFCScanning(false);
-    toast.dismiss();
-    toast.info('Сканирование остановлено');
+  const rejectFile = () => {
+    setIncomingFile(null);
+    toast.info('Передача отклонена');
+    startWaiting();
   };
 
-  const startQRScanning = async () => {
-    if (!videoRef.current) return;
-
-    try {
-      setIsQRScanning(true);
-
-      const qrScanner = new QrScanner(
-        videoRef.current,
-        (result) => {
-          try {
-            const fileData = JSON.parse(result.data);
-            
-            const savedFiles = JSON.parse(localStorage.getItem('received-files') || '[]');
-            const exists = savedFiles.some((f: any) => f.id === fileData.id);
-            
-            if (!exists) {
-              savedFiles.push(fileData);
-              localStorage.setItem('received-files', JSON.stringify(savedFiles));
-              localStorage.setItem(`file-${fileData.id}`, fileData.data);
-              
-              toast.success('Файл получен! 🎉', {
-                description: `${fileData.name} сохранён`,
-              });
-              
-              stopQRScanning();
-              onFileReceived();
-            } else {
-              toast.info('Файл уже существует');
-              stopQRScanning();
-            }
-          } catch (e) {
-            console.error('Error parsing QR data:', e);
-            toast.error('Неверный QR-код', {
-              description: 'Это не QR-код с файлом',
-            });
-          }
-        },
-        {
-          highlightScanRegion: true,
-          highlightCodeOutline: true,
-        }
-      );
-
-      qrScannerRef.current = qrScanner;
-      await qrScanner.start();
-
-      toast.info('Сканируйте QR-код', {
-        description: 'Наведите камеру на QR-код',
-      });
-
-    } catch (error: any) {
-      console.error('QR Scanner Error:', error);
-      toast.error('Ошибка камеры', {
-        description: 'Разрешите доступ к камере',
-      });
-      setIsQRScanning(false);
-    }
-  };
-
-  const stopQRScanning = () => {
-    if (qrScannerRef.current) {
-      qrScannerRef.current.stop();
-      qrScannerRef.current.destroy();
-      qrScannerRef.current = null;
-    }
-    setIsQRScanning(false);
-    toast.dismiss();
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
   return (
-    <div className="min-h-[calc(100vh-120px)] p-6">
+    <div className="min-h-[calc(100vh-120px)] p-6 pb-20">
       <div className="w-full max-w-md mx-auto space-y-6">
         <div className="text-center space-y-2">
-          <div className="flex items-center justify-center gap-2">
-            <h2 className="text-2xl font-semibold tracking-tight">Получить файл</h2>
-            {isNFCSupported && (
-              <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">
-                <Icon name="Nfc" size={14} className="mr-1" />
-                NFC
-              </Badge>
-            )}
-          </div>
+          <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+            Получить файл
+          </h2>
           <p className="text-sm text-muted-foreground">
-            Выберите способ получения файла
+            Ожидайте подключения от отправителя
           </p>
         </div>
 
-        <Card className="p-8">
+        <Card className="p-8 backdrop-blur-sm bg-card/80 border-2 border-border/50">
           <div className="flex flex-col items-center gap-6">
-            {isQRScanning ? (
-              <div className="w-full max-w-sm aspect-square rounded-2xl overflow-hidden bg-black relative">
-                <video
-                  ref={videoRef}
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 border-4 border-primary/50 rounded-2xl pointer-events-none"></div>
-              </div>
+            {incomingFile ? (
+              <>
+                <div className="w-32 h-32 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center shadow-xl animate-pulse">
+                  <Icon name="FileText" size={64} className="text-primary" />
+                </div>
+                <div className="text-center space-y-2">
+                  <p className="text-xl font-semibold">Входящий файл</p>
+                  <p className="text-lg font-medium">{incomingFile.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {formatFileSize(incomingFile.size)}
+                  </p>
+                </div>
+              </>
             ) : (
-              <div className="w-32 h-32 rounded-full bg-primary/10 flex items-center justify-center relative">
-                {isNFCScanning ? (
-                  <>
-                    <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping"></div>
-                    <Icon name="Nfc" size={64} className="text-primary relative z-10 animate-pulse" />
-                  </>
-                ) : (
-                  <Icon name="Download" size={64} className="text-primary" />
-                )}
-              </div>
-            )}
-
-            {isQRScanning ? (
-              <div className="text-center space-y-2">
-                <p className="text-lg font-medium">Сканирование...</p>
-                <p className="text-sm text-muted-foreground">
-                  Наведите камеру на QR-код
-                </p>
-              </div>
-            ) : isNFCScanning ? (
-              <div className="text-center space-y-2">
-                <p className="text-lg font-medium">Ожидание NFC...</p>
-                <p className="text-sm text-muted-foreground">
-                  Поднесите телефон к метке или другому устройству
-                </p>
-              </div>
-            ) : (
-              <div className="text-center space-y-2">
-                <p className="text-lg font-medium">Готов к приёму</p>
-                <p className="text-sm text-muted-foreground">
-                  Выберите способ получения файла
-                </p>
-              </div>
+              <>
+                <div className="w-32 h-32 rounded-2xl bg-primary/10 flex items-center justify-center relative shadow-lg">
+                  {isWaiting ? (
+                    <>
+                      <div className="absolute inset-0 rounded-2xl bg-primary/20 animate-ping"></div>
+                      <Icon name="Radio" size={64} className="text-primary relative z-10 animate-pulse" />
+                    </>
+                  ) : (
+                    <Icon name="Download" size={64} className="text-primary" />
+                  )}
+                </div>
+                <div className="text-center space-y-2">
+                  <p className="text-xl font-semibold">
+                    {isWaiting ? 'Ожидание соединения...' : 'Готов к приёму'}
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {isWaiting 
+                      ? 'Устройство видимо для других'
+                      : 'Нажмите кнопку для ожидания файлов'}
+                  </p>
+                </div>
+              </>
             )}
           </div>
         </Card>
 
-        <div className="space-y-3">
-          {isQRScanning ? (
+        {incomingFile ? (
+          <div className="space-y-3">
             <Button
-              onClick={stopQRScanning}
-              variant="destructive"
-              className="w-full h-14 text-base font-semibold rounded-2xl"
+              onClick={acceptFile}
+              className="w-full h-14 text-base font-semibold rounded-2xl bg-gradient-to-r from-green-600 to-green-500 hover:shadow-xl hover:shadow-green-500/30 transition-all shadow-lg shadow-green-500/20"
+              size="lg"
+            >
+              <Icon name="Check" size={20} className="mr-2" />
+              Принять файл
+            </Button>
+            <Button
+              onClick={rejectFile}
+              variant="outline"
+              className="w-full h-14 text-base font-semibold rounded-2xl border-2"
               size="lg"
             >
               <Icon name="X" size={20} className="mr-2" />
-              Остановить
+              Отклонить
             </Button>
-          ) : isNFCScanning ? (
-            <Button
-              onClick={stopNFCScanning}
-              variant="destructive"
-              className="w-full h-14 text-base font-semibold rounded-2xl"
-              size="lg"
-            >
-              <Icon name="X" size={20} className="mr-2" />
-              Остановить
-            </Button>
-          ) : (
-            <>
-              <Button
-                onClick={startQRScanning}
-                className="w-full h-14 text-base font-semibold rounded-2xl"
-                size="lg"
-              >
-                <Icon name="QrCode" size={20} className="mr-2" />
-                Сканировать QR-код
-              </Button>
+          </div>
+        ) : isWaiting ? (
+          <Button
+            onClick={stopWaiting}
+            variant="destructive"
+            className="w-full h-14 text-base font-semibold rounded-2xl shadow-lg"
+            size="lg"
+          >
+            <Icon name="X" size={20} className="mr-2" />
+            Остановить ожидание
+          </Button>
+        ) : (
+          <Button
+            onClick={startWaiting}
+            className="w-full h-14 text-base font-semibold rounded-2xl shadow-lg shadow-primary/20 bg-gradient-to-r from-primary to-primary/80 hover:shadow-xl hover:shadow-primary/30 transition-all"
+            size="lg"
+          >
+            <Icon name="Wifi" size={20} className="mr-2" />
+            Начать ожидание
+          </Button>
+        )}
 
-              {isNFCSupported && (
-                <Button
-                  onClick={startNFCScanning}
-                  variant="outline"
-                  className="w-full h-14 text-base font-semibold rounded-2xl"
-                  size="lg"
-                >
-                  <Icon name="Nfc" size={20} className="mr-2" />
-                  Принять через NFC
-                </Button>
-              )}
-            </>
-          )}
-        </div>
-
-        <div className="text-center text-xs text-muted-foreground">
-          <p>QR-код работает на всех устройствах</p>
-          {isNFCSupported && (
-            <p className="mt-1">NFC для быстрой передачи между телефонами</p>
-          )}
+        <div className="text-center text-xs text-muted-foreground space-y-1 pt-2">
+          <p>Bluetooth для обнаружения устройств</p>
+          <p>Wi-Fi Direct для быстрой передачи</p>
         </div>
       </div>
     </div>
