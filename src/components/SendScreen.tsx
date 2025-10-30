@@ -1,8 +1,9 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
 
 interface SendScreenProps {
   onFileSent: (file: File) => void;
@@ -11,7 +12,15 @@ interface SendScreenProps {
 export default function SendScreen({ onFileSent }: SendScreenProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isNFCSupported, setIsNFCSupported] = useState(false);
+  const [isNFCWriting, setIsNFCWriting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if ('NDEFReader' in window) {
+      setIsNFCSupported(true);
+    }
+  }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -41,36 +50,70 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
   const handleSend = async () => {
     if (!selectedFile) return;
 
+    if (!isNFCSupported) {
+      toast.error('NFC не поддерживается', {
+        description: 'Ваше устройство не поддерживает NFC',
+      });
+      return;
+    }
+
     try {
-      const savedFiles = JSON.parse(localStorage.getItem('received-files') || '[]');
+      setIsNFCWriting(true);
       
+      const fileReader = new FileReader();
+      const fileDataUrl = await new Promise<string>((resolve, reject) => {
+        fileReader.onload = () => resolve(fileReader.result as string);
+        fileReader.onerror = reject;
+        fileReader.readAsDataURL(selectedFile);
+      });
+
       const fileData = {
         name: selectedFile.name,
         size: selectedFile.size,
         type: selectedFile.type,
         date: new Date().toISOString(),
-        id: Date.now().toString()
+        id: Date.now().toString(),
+        data: fileDataUrl
       };
 
+      const ndef = new (window as any).NDEFReader();
+      await ndef.write({
+        records: [
+          {
+            recordType: 'text',
+            data: JSON.stringify(fileData)
+          }
+        ]
+      });
+
+      const savedFiles = JSON.parse(localStorage.getItem('received-files') || '[]');
       savedFiles.push(fileData);
       localStorage.setItem('received-files', JSON.stringify(savedFiles));
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        localStorage.setItem(`file-${fileData.id}`, e.target?.result as string);
-      };
-      reader.readAsDataURL(selectedFile);
+      localStorage.setItem(`file-${fileData.id}`, fileDataUrl);
 
       onFileSent(selectedFile);
-      toast.success('Файл отправлен', {
-        description: `${selectedFile.name} успешно передан`,
+      toast.success('Файл отправлен через NFC! 🎉', {
+        description: `${selectedFile.name} записан в NFC-метку`,
       });
       
       setSelectedFile(null);
-    } catch (error) {
-      toast.error('Ошибка отправки', {
-        description: 'Не удалось передать файл',
-      });
+    } catch (error: any) {
+      console.error('NFC Error:', error);
+      if (error.name === 'NotAllowedError') {
+        toast.error('Доступ запрещен', {
+          description: 'Разрешите доступ к NFC в настройках браузера',
+        });
+      } else if (error.name === 'NotSupportedError') {
+        toast.error('NFC не поддерживается', {
+          description: 'Ваше устройство не поддерживает запись NFC',
+        });
+      } else {
+        toast.error('Ошибка NFC', {
+          description: 'Поднесите телефон к NFC-метке',
+        });
+      }
+    } finally {
+      setIsNFCWriting(false);
     }
   };
 
@@ -86,9 +129,17 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] p-6">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
-          <h2 className="text-2xl font-semibold tracking-tight">Передать файл</h2>
+          <div className="flex items-center justify-center gap-2">
+            <h2 className="text-2xl font-semibold tracking-tight">Передать файл</h2>
+            {isNFCSupported && (
+              <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">
+                <Icon name="Nfc" size={14} className="mr-1" />
+                NFC
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
-            Выберите файл для отправки
+            {isNFCSupported ? 'Выберите файл для отправки через NFC' : 'NFC не поддерживается на вашем устройстве'}
           </p>
         </div>
 
@@ -155,17 +206,35 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
 
         <Button
           onClick={handleSend}
-          disabled={!selectedFile}
+          disabled={!selectedFile || !isNFCSupported || isNFCWriting}
           className="w-full h-14 text-base font-semibold rounded-2xl"
           size="lg"
         >
-          <Icon name="Send" size={20} className="mr-2" />
-          Передать файл
+          {isNFCWriting ? (
+            <>
+              <Icon name="Loader2" size={20} className="mr-2 animate-spin" />
+              Поднесите к NFC-метке...
+            </>
+          ) : (
+            <>
+              <Icon name="Nfc" size={20} className="mr-2" />
+              Передать через NFC
+            </>
+          )}
         </Button>
 
         <div className="text-center text-xs text-muted-foreground">
-          <p>Поднесите телефоны друг к другу</p>
-          <p className="mt-1">для передачи через NFC или Bluetooth</p>
+          {isNFCSupported ? (
+            <>
+              <p>Поднесите телефон к NFC-метке</p>
+              <p className="mt-1">или к другому устройству с NFC</p>
+            </>
+          ) : (
+            <>
+              <p>NFC требует Android Chrome или Safari на iOS 13+</p>
+              <p className="mt-1">Проверьте настройки браузера</p>
+            </>
+          )}
         </div>
       </div>
     </div>

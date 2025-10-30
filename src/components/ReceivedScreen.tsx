@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
 
 interface FileData {
   id: string;
@@ -14,9 +15,14 @@ interface FileData {
 
 export default function ReceivedScreen() {
   const [files, setFiles] = useState<FileData[]>([]);
+  const [isNFCSupported, setIsNFCSupported] = useState(false);
+  const [isNFCScanning, setIsNFCScanning] = useState(false);
 
   useEffect(() => {
     loadFiles();
+    if ('NDEFReader' in window) {
+      setIsNFCSupported(true);
+    }
   }, []);
 
   const loadFiles = () => {
@@ -25,6 +31,68 @@ export default function ReceivedScreen() {
       setFiles(savedFiles);
     } catch (error) {
       console.error('Error loading files:', error);
+    }
+  };
+
+  const startNFCScanning = async () => {
+    if (!isNFCSupported) {
+      toast.error('NFC не поддерживается');
+      return;
+    }
+
+    try {
+      setIsNFCScanning(true);
+      const ndef = new (window as any).NDEFReader();
+      
+      toast.info('Ожидание NFC...', {
+        description: 'Поднесите телефон к NFC-метке',
+      });
+
+      await ndef.scan();
+
+      ndef.addEventListener('reading', ({ message }: any) => {
+        const decoder = new TextDecoder();
+        for (const record of message.records) {
+          if (record.recordType === 'text') {
+            const textData = decoder.decode(record.data);
+            try {
+              const fileData = JSON.parse(textData);
+              
+              const savedFiles = JSON.parse(localStorage.getItem('received-files') || '[]');
+              const exists = savedFiles.some((f: FileData) => f.id === fileData.id);
+              
+              if (!exists) {
+                savedFiles.push(fileData);
+                localStorage.setItem('received-files', JSON.stringify(savedFiles));
+                localStorage.setItem(`file-${fileData.id}`, fileData.data);
+                
+                setFiles(savedFiles);
+                toast.success('Файл получен! 🎉', {
+                  description: `${fileData.name} сохранён`,
+                });
+              } else {
+                toast.info('Файл уже существует', {
+                  description: `${fileData.name} уже есть в списке`,
+                });
+              }
+            } catch (e) {
+              console.error('Error parsing NFC data:', e);
+            }
+          }
+        }
+      });
+
+    } catch (error: any) {
+      console.error('NFC Scan Error:', error);
+      if (error.name === 'NotAllowedError') {
+        toast.error('Доступ запрещен', {
+          description: 'Разрешите доступ к NFC в настройках',
+        });
+      } else {
+        toast.error('Ошибка сканирования NFC');
+      }
+    } finally {
+      setIsNFCScanning(false);
     }
   };
 
@@ -97,11 +165,39 @@ export default function ReceivedScreen() {
   return (
     <div className="min-h-[calc(100vh-120px)] p-6">
       <div className="w-full max-w-md mx-auto space-y-6">
-        <div className="text-center space-y-2">
-          <h2 className="text-2xl font-semibold tracking-tight">Полученные файлы</h2>
+        <div className="text-center space-y-3">
+          <div className="flex items-center justify-center gap-2">
+            <h2 className="text-2xl font-semibold tracking-tight">Полученные файлы</h2>
+            {isNFCSupported && (
+              <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">
+                <Icon name="Nfc" size={14} className="mr-1" />
+                NFC
+              </Badge>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
             {files.length === 0 ? 'Нет полученных файлов' : `Всего файлов: ${files.length}`}
           </p>
+          {isNFCSupported && (
+            <Button
+              onClick={startNFCScanning}
+              disabled={isNFCScanning}
+              variant="outline"
+              className="w-full max-w-sm h-12 rounded-xl border-2 border-primary/20 hover:bg-primary/5"
+            >
+              {isNFCScanning ? (
+                <>
+                  <Icon name="Loader2" size={20} className="mr-2 animate-spin" />
+                  Ожидание NFC...
+                </>
+              ) : (
+                <>
+                  <Icon name="Nfc" size={20} className="mr-2" />
+                  Принять файл через NFC
+                </>
+              )}
+            </Button>
+          )}
         </div>
 
         {files.length === 0 ? (
