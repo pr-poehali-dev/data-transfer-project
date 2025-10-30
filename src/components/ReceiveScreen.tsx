@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
+import QrScanner from 'qr-scanner';
 
 interface FileData {
   id: string;
@@ -21,11 +22,22 @@ interface ReceiveScreenProps {
 export default function ReceiveScreen({ onFileReceived }: ReceiveScreenProps) {
   const [isNFCSupported, setIsNFCSupported] = useState(false);
   const [isNFCScanning, setIsNFCScanning] = useState(false);
+  const [isQRScanning, setIsQRScanning] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const qrScannerRef = useRef<QrScanner | null>(null);
 
   useEffect(() => {
     if ('NDEFReader' in window) {
       setIsNFCSupported(true);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (qrScannerRef.current) {
+        qrScannerRef.current.destroy();
+      }
+    };
   }, []);
 
   const startNFCScanning = async () => {
@@ -108,6 +120,75 @@ export default function ReceiveScreen({ onFileReceived }: ReceiveScreenProps) {
     toast.info('Сканирование остановлено');
   };
 
+  const startQRScanning = async () => {
+    if (!videoRef.current) return;
+
+    try {
+      setIsQRScanning(true);
+
+      const qrScanner = new QrScanner(
+        videoRef.current,
+        (result) => {
+          try {
+            const fileData = JSON.parse(result.data);
+            
+            const savedFiles = JSON.parse(localStorage.getItem('received-files') || '[]');
+            const exists = savedFiles.some((f: any) => f.id === fileData.id);
+            
+            if (!exists) {
+              savedFiles.push(fileData);
+              localStorage.setItem('received-files', JSON.stringify(savedFiles));
+              localStorage.setItem(`file-${fileData.id}`, fileData.data);
+              
+              toast.success('Файл получен! 🎉', {
+                description: `${fileData.name} сохранён`,
+              });
+              
+              stopQRScanning();
+              onFileReceived();
+            } else {
+              toast.info('Файл уже существует');
+              stopQRScanning();
+            }
+          } catch (e) {
+            console.error('Error parsing QR data:', e);
+            toast.error('Неверный QR-код', {
+              description: 'Это не QR-код с файлом',
+            });
+          }
+        },
+        {
+          highlightScanRegion: true,
+          highlightCodeOutline: true,
+        }
+      );
+
+      qrScannerRef.current = qrScanner;
+      await qrScanner.start();
+
+      toast.info('Сканируйте QR-код', {
+        description: 'Наведите камеру на QR-код',
+      });
+
+    } catch (error: any) {
+      console.error('QR Scanner Error:', error);
+      toast.error('Ошибка камеры', {
+        description: 'Разрешите доступ к камере',
+      });
+      setIsQRScanning(false);
+    }
+  };
+
+  const stopQRScanning = () => {
+    if (qrScannerRef.current) {
+      qrScannerRef.current.stop();
+      qrScannerRef.current.destroy();
+      qrScannerRef.current = null;
+    }
+    setIsQRScanning(false);
+    toast.dismiss();
+  };
+
   return (
     <div className="min-h-[calc(100vh-120px)] p-6">
       <div className="w-full max-w-md mx-auto space-y-6">
@@ -122,24 +203,41 @@ export default function ReceiveScreen({ onFileReceived }: ReceiveScreenProps) {
             )}
           </div>
           <p className="text-sm text-muted-foreground">
-            {isNFCSupported ? 'Поднесите телефон к NFC-метке для получения файла' : 'NFC не поддерживается на вашем устройстве'}
+            Выберите способ получения файла
           </p>
         </div>
 
         <Card className="p-8">
           <div className="flex flex-col items-center gap-6">
-            <div className="w-32 h-32 rounded-full bg-primary/10 flex items-center justify-center relative">
-              {isNFCScanning ? (
-                <>
-                  <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping"></div>
-                  <Icon name="Nfc" size={64} className="text-primary relative z-10 animate-pulse" />
-                </>
-              ) : (
-                <Icon name="Download" size={64} className="text-primary" />
-              )}
-            </div>
+            {isQRScanning ? (
+              <div className="w-full max-w-sm aspect-square rounded-2xl overflow-hidden bg-black relative">
+                <video
+                  ref={videoRef}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 border-4 border-primary/50 rounded-2xl pointer-events-none"></div>
+              </div>
+            ) : (
+              <div className="w-32 h-32 rounded-full bg-primary/10 flex items-center justify-center relative">
+                {isNFCScanning ? (
+                  <>
+                    <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping"></div>
+                    <Icon name="Nfc" size={64} className="text-primary relative z-10 animate-pulse" />
+                  </>
+                ) : (
+                  <Icon name="Download" size={64} className="text-primary" />
+                )}
+              </div>
+            )}
 
-            {isNFCScanning ? (
+            {isQRScanning ? (
+              <div className="text-center space-y-2">
+                <p className="text-lg font-medium">Сканирование...</p>
+                <p className="text-sm text-muted-foreground">
+                  Наведите камеру на QR-код
+                </p>
+              </div>
+            ) : isNFCScanning ? (
               <div className="text-center space-y-2">
                 <p className="text-lg font-medium">Ожидание NFC...</p>
                 <p className="text-sm text-muted-foreground">
@@ -150,46 +248,64 @@ export default function ReceiveScreen({ onFileReceived }: ReceiveScreenProps) {
               <div className="text-center space-y-2">
                 <p className="text-lg font-medium">Готов к приёму</p>
                 <p className="text-sm text-muted-foreground">
-                  Нажмите кнопку и поднесите телефон к NFC-метке
+                  Выберите способ получения файла
                 </p>
               </div>
             )}
           </div>
         </Card>
 
-        {isNFCScanning ? (
-          <Button
-            onClick={stopNFCScanning}
-            variant="destructive"
-            className="w-full h-14 text-base font-semibold rounded-2xl"
-            size="lg"
-          >
-            <Icon name="X" size={20} className="mr-2" />
-            Остановить сканирование
-          </Button>
-        ) : (
-          <Button
-            onClick={startNFCScanning}
-            disabled={!isNFCSupported}
-            className="w-full h-14 text-base font-semibold rounded-2xl"
-            size="lg"
-          >
-            <Icon name="Nfc" size={20} className="mr-2" />
-            Начать приём
-          </Button>
-        )}
-
-        <div className="text-center text-xs text-muted-foreground">
-          {isNFCSupported ? (
-            <>
-              <p>Поддерживаются все типы файлов</p>
-              <p className="mt-1">Файлы сохраняются автоматически</p>
-            </>
+        <div className="space-y-3">
+          {isQRScanning ? (
+            <Button
+              onClick={stopQRScanning}
+              variant="destructive"
+              className="w-full h-14 text-base font-semibold rounded-2xl"
+              size="lg"
+            >
+              <Icon name="X" size={20} className="mr-2" />
+              Остановить
+            </Button>
+          ) : isNFCScanning ? (
+            <Button
+              onClick={stopNFCScanning}
+              variant="destructive"
+              className="w-full h-14 text-base font-semibold rounded-2xl"
+              size="lg"
+            >
+              <Icon name="X" size={20} className="mr-2" />
+              Остановить
+            </Button>
           ) : (
             <>
-              <p>NFC требует Android Chrome или Safari на iOS 13+</p>
-              <p className="mt-1">Проверьте настройки браузера</p>
+              <Button
+                onClick={startQRScanning}
+                className="w-full h-14 text-base font-semibold rounded-2xl"
+                size="lg"
+              >
+                <Icon name="QrCode" size={20} className="mr-2" />
+                Сканировать QR-код
+              </Button>
+
+              {isNFCSupported && (
+                <Button
+                  onClick={startNFCScanning}
+                  variant="outline"
+                  className="w-full h-14 text-base font-semibold rounded-2xl"
+                  size="lg"
+                >
+                  <Icon name="Nfc" size={20} className="mr-2" />
+                  Принять через NFC
+                </Button>
+              )}
             </>
+          )}
+        </div>
+
+        <div className="text-center text-xs text-muted-foreground">
+          <p>QR-код работает на всех устройствах</p>
+          {isNFCSupported && (
+            <p className="mt-1">NFC для быстрой передачи между телефонами</p>
           )}
         </div>
       </div>

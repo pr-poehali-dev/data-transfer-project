@@ -4,6 +4,14 @@ import { Card } from '@/components/ui/card';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
+import QRCode from 'qrcode';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 interface SendScreenProps {
   onFileSent: (file: File) => void;
@@ -14,6 +22,9 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isNFCSupported, setIsNFCSupported] = useState(false);
   const [isNFCWriting, setIsNFCWriting] = useState(false);
+  const [showQRDialog, setShowQRDialog] = useState(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+  const [fileUrl, setFileUrl] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -47,7 +58,7 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
     setIsDragging(false);
   };
 
-  const handleSend = async () => {
+  const handleSendNFC = async () => {
     if (!selectedFile) return;
 
     if (!isNFCSupported) {
@@ -77,6 +88,11 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
       };
 
       const ndef = new (window as any).NDEFReader();
+      
+      toast.info('Поднесите телефон к NFC-метке...', {
+        duration: 5000,
+      });
+      
       await ndef.write({
         records: [
           {
@@ -109,11 +125,60 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
         });
       } else {
         toast.error('Ошибка NFC', {
-          description: 'Поднесите телефон к NFC-метке',
+          description: error.message || 'Поднесите телефон к NFC-метке',
         });
       }
     } finally {
       setIsNFCWriting(false);
+    }
+  };
+
+  const handleSendQR = async () => {
+    if (!selectedFile) return;
+
+    try {
+      const fileReader = new FileReader();
+      const fileDataUrl = await new Promise<string>((resolve, reject) => {
+        fileReader.onload = () => resolve(fileReader.result as string);
+        fileReader.onerror = reject;
+        fileReader.readAsDataURL(selectedFile);
+      });
+
+      const fileData = {
+        name: selectedFile.name,
+        size: selectedFile.size,
+        type: selectedFile.type,
+        date: new Date().toISOString(),
+        id: Date.now().toString(),
+        data: fileDataUrl
+      };
+
+      const dataString = JSON.stringify(fileData);
+      
+      if (dataString.length > 2953) {
+        toast.error('Файл слишком большой', {
+          description: 'Для QR-кода используйте файлы до 100KB',
+        });
+        return;
+      }
+
+      const qrUrl = await QRCode.toDataURL(dataString, {
+        width: 400,
+        margin: 2,
+        errorCorrectionLevel: 'L'
+      });
+
+      setFileUrl(fileDataUrl);
+      setQrCodeUrl(qrUrl);
+      setShowQRDialog(true);
+
+      toast.success('QR-код сгенерирован! 🎉', {
+        description: 'Отсканируйте его на другом устройстве',
+      });
+
+    } catch (error) {
+      console.error('QR Error:', error);
+      toast.error('Ошибка генерации QR-кода');
     }
   };
 
@@ -204,39 +269,71 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
           </div>
         </Card>
 
-        <Button
-          onClick={handleSend}
-          disabled={!selectedFile || !isNFCSupported || isNFCWriting}
-          className="w-full h-14 text-base font-semibold rounded-2xl"
-          size="lg"
-        >
-          {isNFCWriting ? (
-            <>
-              <Icon name="Loader2" size={20} className="mr-2 animate-spin" />
-              Поднесите к NFC-метке...
-            </>
-          ) : (
-            <>
-              <Icon name="Nfc" size={20} className="mr-2" />
-              Передать через NFC
-            </>
+        <div className="space-y-3">
+          <Button
+            onClick={handleSendQR}
+            disabled={!selectedFile}
+            className="w-full h-14 text-base font-semibold rounded-2xl"
+            size="lg"
+          >
+            <Icon name="QrCode" size={20} className="mr-2" />
+            Передать через QR-код
+          </Button>
+
+          {isNFCSupported && (
+            <Button
+              onClick={handleSendNFC}
+              disabled={!selectedFile || isNFCWriting}
+              variant="outline"
+              className="w-full h-14 text-base font-semibold rounded-2xl"
+              size="lg"
+            >
+              {isNFCWriting ? (
+                <>
+                  <Icon name="Loader2" size={20} className="mr-2 animate-spin" />
+                  Поднесите к NFC-метке...
+                </>
+              ) : (
+                <>
+                  <Icon name="Nfc" size={20} className="mr-2" />
+                  Передать через NFC
+                </>
+              )}
+            </Button>
           )}
-        </Button>
+        </div>
 
         <div className="text-center text-xs text-muted-foreground">
-          {isNFCSupported ? (
-            <>
-              <p>Поднесите телефон к NFC-метке</p>
-              <p className="mt-1">или к другому устройству с NFC</p>
-            </>
-          ) : (
-            <>
-              <p>NFC требует Android Chrome или Safari на iOS 13+</p>
-              <p className="mt-1">Проверьте настройки браузера</p>
-            </>
+          <p>QR-код работает на всех устройствах</p>
+          {isNFCSupported && (
+            <p className="mt-1">NFC для быстрой передачи между телефонами</p>
           )}
         </div>
       </div>
+
+      <Dialog open={showQRDialog} onOpenChange={setShowQRDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Отсканируйте QR-код</DialogTitle>
+            <DialogDescription>
+              {selectedFile?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4 py-4">
+            {qrCodeUrl && (
+              <img
+                src={qrCodeUrl}
+                alt="QR Code"
+                className="w-full max-w-sm rounded-lg border-4 border-border"
+              />
+            )}
+            <p className="text-sm text-muted-foreground text-center">
+              Откройте камеру или сканер QR-кодов<br />
+              на другом устройстве
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
