@@ -3,27 +3,57 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
+import { p2p } from '@/lib/p2p';
+import { Input } from '@/components/ui/input';
 
 interface SendScreenProps {
   onFileSent: (file: File) => void;
 }
 
-interface PeerDevice {
-  id: string;
-  name: string;
-  signal: number;
-}
-
 export default function SendScreen({ onFileSent }: SendScreenProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [devices, setDevices] = useState<PeerDevice[]>([]);
-  const [selectedDevice, setSelectedDevice] = useState<PeerDevice | null>(null);
+  const [myPeerId, setMyPeerId] = useState<string>('');
+  const [targetPeerId, setTargetPeerId] = useState<string>('');
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectedPeer, setConnectedPeer] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const dataChannelRef = useRef<RTCDataChannel | null>(null);
+
+  useEffect(() => {
+    const initP2P = async () => {
+      try {
+        const id = await p2p.initialize();
+        setMyPeerId(id);
+        toast.success('Готов к передаче', {
+          description: `Ваш ID: ${id.substring(0, 8)}...`,
+        });
+      } catch (error) {
+        console.error('P2P init error:', error);
+        toast.error('Ошибка инициализации');
+      }
+    };
+
+    initP2P();
+
+    p2p.onConnection((peerId) => {
+      setConnectedPeer(peerId);
+      toast.success('Устройство подключено!', {
+        description: `ID: ${peerId.substring(0, 8)}...`,
+      });
+    });
+
+    p2p.onDisconnect((peerId) => {
+      if (connectedPeer === peerId) {
+        setConnectedPeer(null);
+        toast.info('Устройство отключено');
+      }
+    });
+
+    return () => {
+      p2p.destroy();
+    };
+  }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -50,46 +80,35 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
     setIsDragging(false);
   };
 
-  const scanForDevices = async () => {
-    if (!selectedFile) {
-      toast.error('Выберите файл для отправки');
+  const connectToPeer = async () => {
+    if (!targetPeerId.trim()) {
+      toast.error('Введите ID устройства');
       return;
     }
 
     try {
-      setIsScanning(true);
-      toast.info('Поиск устройств...', {
-        description: 'Убедитесь, что на другом устройстве открыт экран "Получить"',
-        duration: 5000,
-      });
-
-      const mockDevices: PeerDevice[] = [
-        { id: '1', name: 'iPhone 13', signal: 95 },
-        { id: '2', name: 'Samsung Galaxy', signal: 87 },
-        { id: '3', name: 'MacBook Pro', signal: 72 },
-      ];
-
-      setTimeout(() => {
-        setDevices(mockDevices);
-        setIsScanning(false);
-        toast.success('Устройства найдены!', {
-          description: `Обнаружено ${mockDevices.length} устройств`,
-        });
-      }, 2000);
-
+      setIsConnecting(true);
+      await p2p.connect(targetPeerId);
+      setConnectedPeer(targetPeerId);
+      toast.success('Подключено к устройству!');
     } catch (error) {
-      console.error('Scan error:', error);
-      toast.error('Ошибка поиска устройств');
-      setIsScanning(false);
+      console.error('Connection error:', error);
+      toast.error('Не удалось подключиться', {
+        description: 'Проверьте ID устройства',
+      });
+    } finally {
+      setIsConnecting(false);
     }
   };
 
-  const sendFile = async (device: PeerDevice) => {
-    if (!selectedFile) return;
+  const sendFile = async () => {
+    if (!selectedFile || !connectedPeer) return;
 
     try {
       setIsSending(true);
-      setSelectedDevice(device);
+      toast.info('Отправка файла...', {
+        description: 'Не закрывайте страницу',
+      });
 
       const fileReader = new FileReader();
       const fileDataUrl = await new Promise<string>((resolve, reject) => {
@@ -99,29 +118,47 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
       });
 
       const fileData = {
+        type: 'file',
         name: selectedFile.name,
         size: selectedFile.size,
-        type: selectedFile.type,
+        fileType: selectedFile.type,
         date: new Date().toISOString(),
         id: Date.now().toString(),
         data: fileDataUrl
       };
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const chunkSize = 16384;
+      const data = JSON.stringify(fileData);
+      const totalChunks = Math.ceil(data.length / chunkSize);
 
-      const savedFiles = JSON.parse(localStorage.getItem('received-files') || '[]');
-      savedFiles.push(fileData);
-      localStorage.setItem('received-files', JSON.stringify(savedFiles));
-      localStorage.setItem(`file-${fileData.id}`, fileDataUrl);
+      p2p.send(connectedPeer, {
+        type: 'file-start',
+        totalChunks,
+        fileName: selectedFile.name,
+        fileSize: selectedFile.size,
+      });
+
+      for (let i = 0; i < totalChunks; i++) {
+        const chunk = data.slice(i * chunkSize, (i + 1) * chunkSize);
+        p2p.send(connectedPeer, {
+          type: 'file-chunk',
+          chunk,
+          index: i,
+          totalChunks
+        });
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+
+      p2p.send(connectedPeer, {
+        type: 'file-complete'
+      });
 
       onFileSent(selectedFile);
       toast.success('Файл отправлен! 🎉', {
-        description: `${selectedFile.name} отправлен на ${device.name}`,
+        description: `${selectedFile.name}`,
       });
 
       setSelectedFile(null);
-      setDevices([]);
-      setSelectedDevice(null);
 
     } catch (error) {
       console.error('Send error:', error);
@@ -139,6 +176,11 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
+  const copyPeerId = () => {
+    navigator.clipboard.writeText(myPeerId);
+    toast.success('ID скопирован!');
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)] p-6 pb-20">
       <div className="w-full max-w-md space-y-6">
@@ -147,9 +189,84 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
             Передать файл
           </h2>
           <p className="text-sm text-muted-foreground">
-            Выберите файл и найдите устройство для отправки
+            Подключитесь к устройству и отправьте файл
           </p>
         </div>
+
+        {myPeerId && (
+          <Card className="p-4 backdrop-blur-sm bg-card/80 border-2 border-primary/20">
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground font-medium">Ваш ID для подключения:</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 px-3 py-2 rounded-lg bg-accent text-sm font-mono truncate">
+                  {myPeerId}
+                </code>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={copyPeerId}
+                  className="flex-shrink-0"
+                >
+                  <Icon name="Copy" size={16} />
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {!connectedPeer && (
+          <Card className="p-4 backdrop-blur-sm bg-card/80 border-2 border-border/50">
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Подключиться к устройству:</p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Введите ID устройства"
+                  value={targetPeerId}
+                  onChange={(e) => setTargetPeerId(e.target.value)}
+                  className="flex-1"
+                />
+                <Button
+                  onClick={connectToPeer}
+                  disabled={isConnecting || !targetPeerId.trim()}
+                  size="icon"
+                  className="flex-shrink-0"
+                >
+                  {isConnecting ? (
+                    <Icon name="Loader2" size={20} className="animate-spin" />
+                  ) : (
+                    <Icon name="Link" size={20} />
+                  )}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {connectedPeer && (
+          <Card className="p-4 backdrop-blur-sm bg-green-500/10 border-2 border-green-500/30">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center">
+                <Icon name="CheckCircle" size={24} className="text-green-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm">Подключено</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {connectedPeer}
+                </p>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => {
+                  p2p.disconnect(connectedPeer);
+                  setConnectedPeer(null);
+                }}
+              >
+                <Icon name="X" size={16} />
+              </Button>
+            </div>
+          </Card>
+        )}
 
         <Card
           className={`p-8 transition-all duration-300 border-2 backdrop-blur-sm ${
@@ -189,7 +306,6 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
                   onClick={(e) => {
                     e.stopPropagation();
                     setSelectedFile(null);
-                    setDevices([]);
                   }}
                   className="text-destructive hover:text-destructive hover:bg-destructive/10"
                 >
@@ -213,61 +329,28 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
           </div>
         </Card>
 
-        {devices.length > 0 && (
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-muted-foreground">Доступные устройства:</p>
-            {devices.map((device) => (
-              <Card
-                key={device.id}
-                className="p-4 cursor-pointer transition-all hover:shadow-md hover:border-primary/50 bg-card/80 backdrop-blur-sm"
-                onClick={() => sendFile(device)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-                      <Icon name="Smartphone" size={24} className="text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-semibold">{device.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Сигнал: {device.signal}%
-                      </p>
-                    </div>
-                  </div>
-                  <Icon name="Send" size={20} className="text-muted-foreground" />
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-
         <Button
-          onClick={scanForDevices}
-          disabled={!selectedFile || isScanning || isSending}
+          onClick={sendFile}
+          disabled={!selectedFile || !connectedPeer || isSending}
           className="w-full h-14 text-base font-semibold rounded-2xl shadow-lg shadow-primary/20 bg-gradient-to-r from-primary to-primary/80 hover:shadow-xl hover:shadow-primary/30 transition-all"
           size="lg"
         >
-          {isScanning ? (
-            <>
-              <Icon name="Loader2" size={20} className="mr-2 animate-spin" />
-              Поиск устройств...
-            </>
-          ) : isSending ? (
+          {isSending ? (
             <>
               <Icon name="Loader2" size={20} className="mr-2 animate-spin" />
               Отправка...
             </>
           ) : (
             <>
-              <Icon name="Radar" size={20} className="mr-2" />
-              Найти устройства
+              <Icon name="Send" size={20} className="mr-2" />
+              Отправить файл
             </>
           )}
         </Button>
 
         <div className="text-center text-xs text-muted-foreground space-y-1 pt-2">
-          <p>Bluetooth для обнаружения устройств</p>
-          <p>Wi-Fi Direct для быстрой передачи</p>
+          <p>Прямое P2P соединение через WebRTC</p>
+          <p>Файлы передаются напрямую между устройствами</p>
         </div>
       </div>
     </div>
