@@ -5,6 +5,7 @@ import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
 import { p2p } from '@/lib/p2p';
 import { Input } from '@/components/ui/input';
+import { getOrCreateDeviceId, getDeviceName } from '@/lib/deviceId';
 
 interface SendScreenProps {
   onFileSent: (file: File) => void;
@@ -15,6 +16,7 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [myPeerId, setMyPeerId] = useState<string>('');
+  const [deviceName] = useState<string>(getDeviceName());
   const [targetPeerId, setTargetPeerId] = useState<string>('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectedPeer, setConnectedPeer] = useState<string | null>(null);
@@ -23,10 +25,11 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
   useEffect(() => {
     const initP2P = async () => {
       try {
-        const id = await p2p.initialize();
+        const deviceId = getOrCreateDeviceId();
+        const id = await p2p.initialize(deviceId);
         setMyPeerId(id);
         toast.success('Готов к передаче', {
-          description: `Ваш ID: ${id.substring(0, 8)}...`,
+          description: deviceName,
         });
       } catch (error) {
         console.error('P2P init error:', error);

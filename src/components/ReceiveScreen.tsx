@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
 import { p2p } from '@/lib/p2p';
+import { getOrCreateDeviceId, getDeviceName } from '@/lib/deviceId';
 
 interface ReceiveScreenProps {
   onFileReceived: () => void;
@@ -11,6 +12,7 @@ interface ReceiveScreenProps {
 
 export default function ReceiveScreen({ onFileReceived }: ReceiveScreenProps) {
   const [myPeerId, setMyPeerId] = useState<string>('');
+  const [deviceName] = useState<string>(getDeviceName());
   const [connectedPeer, setConnectedPeer] = useState<string | null>(null);
   const [receivingProgress, setReceivingProgress] = useState<{
     fileName: string;
@@ -24,7 +26,8 @@ export default function ReceiveScreen({ onFileReceived }: ReceiveScreenProps) {
   useEffect(() => {
     const initP2P = async () => {
       try {
-        const id = await p2p.initialize();
+        const deviceId = getOrCreateDeviceId();
+        const id = await p2p.initialize(deviceId);
         setMyPeerId(id);
       } catch (error) {
         console.error('P2P init error:', error);
