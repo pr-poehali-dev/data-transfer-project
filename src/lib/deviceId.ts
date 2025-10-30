@@ -2,21 +2,8 @@ const DEVICE_ID_KEY = 'device-id';
 const DEVICE_NAME_KEY = 'device-name';
 
 function generateDeviceId(): string {
-  const adjectives = [
-    'Быстрый', 'Красный', 'Синий', 'Зелёный', 'Яркий',
-    'Тихий', 'Громкий', 'Умный', 'Весёлый', 'Добрый'
-  ];
-  
-  const nouns = [
-    'Телефон', 'Ноутбук', 'Планшет', 'Компьютер', 'Устройство',
-    'Гаджет', 'Смартфон', 'Макбук', 'Айфон', 'Андроид'
-  ];
-  
-  const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
-  const noun = nouns[Math.floor(Math.random() * nouns.length)];
-  const number = Math.floor(Math.random() * 9999);
-  
-  return `${adjective}${noun}${number}`;
+  const number = Math.floor(10000 + Math.random() * 90000);
+  return number.toString();
 }
 
 export function getOrCreateDeviceId(): string {

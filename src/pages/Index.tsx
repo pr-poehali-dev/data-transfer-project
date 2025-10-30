@@ -1,12 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SendScreen from '@/components/SendScreen';
 import ReceiveScreen from '@/components/ReceiveScreen';
 import ReceivedScreen from '@/components/ReceivedScreen';
 import Icon from '@/components/ui/icon';
+import { getOrCreateDeviceId } from '@/lib/deviceId';
 
 export default function Index() {
   const [activeTab, setActiveTab] = useState('send');
+  const [deviceId, setDeviceId] = useState<string>('');
+
+  useEffect(() => {
+    setDeviceId(getOrCreateDeviceId());
+  }, []);
 
   const handleFileSent = (file: File) => {
     setActiveTab('history');
@@ -22,7 +28,15 @@ export default function Index() {
         <div className="backdrop-blur-xl sticky top-0 z-10 border-b border-border/30 bg-background/80">
           <div className="p-5 text-center">
             <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">ShareDrop</h1>
-            <p className="text-xs text-muted-foreground mt-1">Быстрая передача файлов</p>
+            <div className="flex items-center justify-center gap-2 mt-1">
+              <p className="text-xs text-muted-foreground">Быстрая передача файлов</p>
+              {deviceId && (
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">
+                  <Icon name="Fingerprint" size={12} className="text-primary" />
+                  <span className="text-xs font-mono font-semibold text-primary">{deviceId}</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
