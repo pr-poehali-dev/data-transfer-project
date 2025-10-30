@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SendScreen from '@/components/SendScreen';
+import ReceiveScreen from '@/components/ReceiveScreen';
 import ReceivedScreen from '@/components/ReceivedScreen';
 import Icon from '@/components/ui/icon';
 
@@ -8,7 +9,11 @@ export default function Index() {
   const [activeTab, setActiveTab] = useState('send');
 
   const handleFileSent = (file: File) => {
-    setActiveTab('received');
+    setActiveTab('history');
+  };
+
+  const handleFileReceived = () => {
+    setActiveTab('history');
   };
 
   return (
@@ -22,20 +27,27 @@ export default function Index() {
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <div className="ios-blur sticky top-[72px] z-10 border-b border-border/50 px-6 pt-4">
-            <TabsList className="w-full h-12 bg-accent/50 p-1 rounded-xl">
+            <TabsList className="w-full h-12 bg-accent/50 p-1 rounded-xl grid grid-cols-3">
               <TabsTrigger 
                 value="send" 
-                className="flex-1 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm transition-all"
+                className="rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm transition-all"
               >
-                <Icon name="Send" size={18} className="mr-2" />
+                <Icon name="Send" size={18} className="mr-1.5" />
                 Передать
               </TabsTrigger>
               <TabsTrigger 
-                value="received"
-                className="flex-1 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm transition-all"
+                value="receive"
+                className="rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm transition-all"
               >
-                <Icon name="Inbox" size={18} className="mr-2" />
-                Полученные
+                <Icon name="Download" size={18} className="mr-1.5" />
+                Получить
+              </TabsTrigger>
+              <TabsTrigger 
+                value="history"
+                className="rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm transition-all"
+              >
+                <Icon name="Clock" size={18} className="mr-1.5" />
+                История
               </TabsTrigger>
             </TabsList>
           </div>
@@ -44,7 +56,11 @@ export default function Index() {
             <SendScreen onFileSent={handleFileSent} />
           </TabsContent>
 
-          <TabsContent value="received" className="mt-0">
+          <TabsContent value="receive" className="mt-0">
+            <ReceiveScreen onFileReceived={handleFileReceived} />
+          </TabsContent>
+
+          <TabsContent value="history" className="mt-0">
             <ReceivedScreen />
           </TabsContent>
         </Tabs>
