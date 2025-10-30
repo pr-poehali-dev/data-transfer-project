@@ -26,14 +26,18 @@ export default function SendScreen({ onFileSent }: SendScreenProps) {
     const initP2P = async () => {
       try {
         const deviceId = getOrCreateDeviceId();
+        console.log('Initializing with device ID:', deviceId);
         const id = await p2p.initialize(deviceId);
+        console.log('Initialized successfully with ID:', id);
         setMyPeerId(id);
         toast.success('Готов к передаче', {
-          description: deviceName,
+          description: `ID: ${id}`,
         });
       } catch (error) {
         console.error('P2P init error:', error);
-        toast.error('Ошибка инициализации');
+        toast.error('Ошибка инициализации', {
+          description: error instanceof Error ? error.message : 'Неизвестная ошибка'
+        });
       }
     };
 

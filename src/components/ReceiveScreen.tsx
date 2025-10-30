@@ -27,11 +27,18 @@ export default function ReceiveScreen({ onFileReceived }: ReceiveScreenProps) {
     const initP2P = async () => {
       try {
         const deviceId = getOrCreateDeviceId();
+        console.log('Initializing receiver with device ID:', deviceId);
         const id = await p2p.initialize(deviceId);
+        console.log('Receiver initialized with ID:', id);
         setMyPeerId(id);
+        toast.success('Готов принимать', {
+          description: `ID: ${id}`,
+        });
       } catch (error) {
         console.error('P2P init error:', error);
-        toast.error('Ошибка инициализации');
+        toast.error('Ошибка инициализации', {
+          description: error instanceof Error ? error.message : 'Неизвестная ошибка'
+        });
       }
     };
 

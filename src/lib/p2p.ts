@@ -11,19 +11,18 @@ export class P2PConnection {
   async initialize(peerId?: string): Promise<string> {
     return new Promise((resolve, reject) => {
       try {
-        // Используем публичный PeerJS сервер с кастомным ID
+        // Используем дефолтный PeerJS Cloud сервер
         this.peer = new Peer(peerId, {
-          host: 'peerjs-server.herokuapp.com',
-          secure: true,
-          port: 443,
-          path: '/',
           config: {
             iceServers: [
               { urls: 'stun:stun.l.google.com:19302' },
               { urls: 'stun:stun1.l.google.com:19302' },
               { urls: 'stun:stun2.l.google.com:19302' },
+              { urls: 'stun:stun3.l.google.com:19302' },
+              { urls: 'stun:stun4.l.google.com:19302' },
             ]
-          }
+          },
+          debug: 2
         });
 
         this.peer.on('open', (id) => {
