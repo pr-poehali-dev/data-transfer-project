@@ -11,7 +11,8 @@ export class P2PConnection {
   async initialize(peerId?: string): Promise<string> {
     return new Promise((resolve, reject) => {
       try {
-        this.peer = new Peer(peerId, {
+        const peerIdWithPrefix = peerId ? `sharedrop-${peerId}` : undefined;
+        this.peer = new Peer(peerIdWithPrefix, {
           config: {
             iceServers: [
               { urls: 'stun:stun.l.google.com:19302' },
@@ -22,10 +23,11 @@ export class P2PConnection {
 
         this.peer.on('open', (id) => {
           console.log('Peer ID:', id);
+          const cleanId = id.replace('sharedrop-', '');
           if (this.onPeerIdCallback) {
-            this.onPeerIdCallback(id);
+            this.onPeerIdCallback(cleanId);
           }
-          resolve(id);
+          resolve(cleanId);
         });
 
         this.peer.on('connection', (conn) => {
@@ -44,12 +46,13 @@ export class P2PConnection {
   }
 
   private setupConnection(conn: DataConnection) {
-    this.connections.set(conn.peer, conn);
+    const cleanPeerId = conn.peer.replace('sharedrop-', '');
+    this.connections.set(cleanPeerId, conn);
 
     conn.on('open', () => {
       console.log('Connection opened with:', conn.peer);
       if (this.onConnectionCallback) {
-        this.onConnectionCallback(conn.peer);
+        this.onConnectionCallback(cleanPeerId);
       }
     });
 
@@ -62,15 +65,17 @@ export class P2PConnection {
 
     conn.on('close', () => {
       console.log('Connection closed with:', conn.peer);
-      this.connections.delete(conn.peer);
+      const cleanPeerId = conn.peer.replace('sharedrop-', '');
+      this.connections.delete(cleanPeerId);
       if (this.onDisconnectCallback) {
-        this.onDisconnectCallback(conn.peer);
+        this.onDisconnectCallback(cleanPeerId);
       }
     });
 
     conn.on('error', (error) => {
       console.error('Connection error:', error);
-      this.connections.delete(conn.peer);
+      const cleanPeerId = conn.peer.replace('sharedrop-', '');
+      this.connections.delete(cleanPeerId);
     });
   }
 
@@ -82,7 +87,8 @@ export class P2PConnection {
       }
 
       try {
-        const conn = this.peer.connect(peerId, { reliable: true });
+        const fullPeerId = `sharedrop-${peerId}`;
+        const conn = this.peer.connect(fullPeerId, { reliable: true });
         this.setupConnection(conn);
 
         conn.on('open', () => {
